@@ -19,7 +19,9 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function onSignup(e: React.FormEvent) {
+  import { useMemo, useState, type FormEvent } from 'react'
+// ...
+async function onSignup(e: FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError(null)
