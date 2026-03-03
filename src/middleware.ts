@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+import { createServerClient } from "@supabase/ssr"
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next();
+  // Start with a pass-through response we can attach cookies to
+  const response = NextResponse.next()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,51 +12,50 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
+            response.cookies.set(name, value, options)
+          })
         },
       },
     }
-  );
+  )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getUser()
+  const user = data.user
 
-  const path = request.nextUrl.pathname;
+  const path = request.nextUrl.pathname
 
-  const isAuthRoute = path.startsWith("/login") || path.startsWith("/signup");
-  const isPublic = isAuthRoute || path === "/";
+  const isAuthPage = path.startsWith("/login") || path.startsWith("/signup")
+  const isProtected = path.startsWith("/feed") || path.startsWith("/onboarding")
 
-  // If not logged in, block private pages
-  if (!user && !isPublic) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", path);
-    return NextResponse.redirect(url);
+  // If not logged in and trying to access protected routes -> /login
+  if (!user && isProtected) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/login"
+    url.searchParams.set("next", path)
+    return NextResponse.redirect(url)
   }
 
-  // If logged in, keep them out of auth pages
-  if (user && isAuthRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/feed";
-    return NextResponse.redirect(url);
+  // If logged in and trying to access auth pages -> /feed
+  if (user && isAuthPage) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/feed"
+    url.searchParams.delete("next")
+    return NextResponse.redirect(url)
   }
 
-  return response;
+  return response
 }
 
 export const config = {
   matcher: [
-    /*
-      Run on everything except:
-      - next internals
-      - static files
-    */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // Protect only these routes (and subroutes)
+    "/feed/:path*",
+    "/onboarding/:path*",
+    "/login",
+    "/signup",
   ],
-};
+}
