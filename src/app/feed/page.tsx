@@ -88,50 +88,18 @@ export default function FeedPage() {
       return
     }
 
-    setSignals(data ?? [])
+    setSignals((data ?? []) as SignalRow[])
     setSignalsLoading(false)
   }
 
+  // Load signals once auth/loading finishes
   useEffect(() => {
     if (!loading) loadSignals()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
-    useEffect(() => {
-  if (loading) return
-
-  const channel = supabase
-    .channel('signals-live')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'signals' },
-      () => {
-        loadSignals()
-      }
-    )
-    .subscribe()
-
-  return () => {
-    supabase.removeChannel(channel)
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [loading, supabase])
 
   async function createSignal() {
-    async function closeSignal(signalId: string) {
-  setErrorMsg(null)
-
-  const { error } = await supabase
-    .from('signals')
-    .update({ closed_at: new Date().toISOString() })
-    .eq('id', signalId)
-
-  if (error) {
-    setErrorMsg(error.message)
-    return
-  }
-
-  await loadSignals()
-}if (!userId) return
+    if (!userId) return
 
     setErrorMsg(null)
 
@@ -140,7 +108,7 @@ export default function FeedPage() {
       city: city.trim(),
       category: category.trim(),
       body: body.trim() ? body.trim() : null,
-      expires_at: isoPlusHours(24), // 24 hours from now
+      expires_at: isoPlusHours(24),
     }
 
     const { error } = await supabase.from('signals').insert(payload)
@@ -150,9 +118,24 @@ export default function FeedPage() {
       return
     }
 
-    // reset + refresh
     setShowCreate(false)
     setBody('')
+    await loadSignals()
+  }
+
+  async function closeSignal(signalId: string) {
+    setErrorMsg(null)
+
+    const { error } = await supabase
+      .from('signals')
+      .update({ closed_at: new Date().toISOString() })
+      .eq('id', signalId)
+
+    if (error) {
+      setErrorMsg(error.message)
+      return
+    }
+
     await loadSignals()
   }
 
@@ -167,7 +150,6 @@ export default function FeedPage() {
   return (
     <main className="min-h-screen p-6">
       <div className="max-w-md mx-auto space-y-6">
-
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold">Tap-In Feed</h1>
           <button
@@ -217,15 +199,30 @@ export default function FeedPage() {
                   <div className="font-semibold">
                     {s.category} <span className="text-white/50">•</span> {s.city}
                   </div>
-                  <div className="text-xs text-white/50 whitespace-nowrap">
-                    {new Date(s.created_at).toLocaleString()}
+
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-white/50 whitespace-nowrap">
+                      {new Date(s.created_at).toLocaleString()}
+                    </div>
+
+                    {/* Show Close only for your own signal */}
+                    {userId && s.user_id === userId && (
+                      <button
+                        onClick={() => closeSignal(s.id)}
+                        className="text-xs text-white/70 border border-white/15 bg-white/5 hover:bg-white/10 px-2 py-1 rounded-md"
+                      >
+                        Close
+                      </button>
+                    )}
                   </div>
                 </div>
+
                 {s.body ? (
                   <div className="mt-2 text-white/80">{s.body}</div>
                 ) : (
                   <div className="mt-2 text-white/50 text-sm">(no message)</div>
                 )}
+
                 <div className="mt-2 text-xs text-white/50">
                   Expires: {new Date(s.expires_at).toLocaleString()}
                 </div>
@@ -277,9 +274,7 @@ export default function FeedPage() {
                 className="w-full min-h-[90px] rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none"
                 placeholder="What’s your signal?"
               />
-              <div className="text-xs text-white/50">
-                Auto-expires in 24 hours.
-              </div>
+              <div className="text-xs text-white/50">Auto-expires in 24 hours.</div>
             </div>
 
             <button
