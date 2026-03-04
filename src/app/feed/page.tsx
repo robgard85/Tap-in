@@ -117,7 +117,21 @@ export default function FeedPage() {
 }, [loading, supabase])
 
   async function createSignal() {
-    if (!userId) return
+    async function closeSignal(signalId: string) {
+  setErrorMsg(null)
+
+  const { error } = await supabase
+    .from('signals')
+    .update({ closed_at: new Date().toISOString() })
+    .eq('id', signalId)
+
+  if (error) {
+    setErrorMsg(error.message)
+    return
+  }
+
+  await loadSignals()
+}if (!userId) return
 
     setErrorMsg(null)
 
