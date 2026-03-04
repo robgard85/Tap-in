@@ -38,12 +38,13 @@ export default function FeedPage() {
   const [signalsLoading, setSignalsLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Create Signal UI
+  // Create modal
   const [showCreate, setShowCreate] = useState(false)
   const [city, setCity] = useState('Kannapolis')
   const [category, setCategory] = useState('general')
   const [body, setBody] = useState('')
 
+  // 1) Auth gate
   useEffect(() => {
     ;(async () => {
       const { data, error } = await supabase.auth.getUser()
@@ -70,9 +71,9 @@ export default function FeedPage() {
     router.replace('/login')
   }
 
+  // 2) Load signals
   async function loadSignals() {
     setSignalsLoading(true)
-    setErrorMsg(null)
 
     const { data, error } = await supabase
       .from('signals')
@@ -89,19 +90,52 @@ export default function FeedPage() {
     }
 
     setSignals((data ?? []) as SignalRow[])
+    setErrorMsg(null) // ✅ clears stale “violates RLS” banner after success
     setSignalsLoading(false)
   }
 
-  // Load signals once auth/loading finishes
+  // 3) Load once after auth finishes
   useEffect(() => {
-    if (!loading) loadSignals()
+    if (loading) return
+    loadSignals()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
 
+  // 4) Realtime refresh (optional but nice)
+  useEffect(() => {
+    if (loading) return
+
+    const channel = supabase
+      .channel('signals-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'signals' },
+        () => {
+          loadSignals()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, supabase])
+
+  // Helper: does this user currently have an open signal?
+  const myOpenSignal = userId
+    ? signals.find((s) => s.user_id === userId && s.closed_at === null)
+    : undefined
+
+  // 5) Create
   async function createSignal() {
     if (!userId) return
 
-    setErrorMsg(null)
+    // If you want “one open signal max”, enforce it here:
+    if (myOpenSignal) {
+      setErrorMsg('You already have an open signal. Close it first.')
+      return
+    }
 
     const payload = {
       user_id: userId,
@@ -118,11 +152,13 @@ export default function FeedPage() {
       return
     }
 
+    setErrorMsg(null)
     setShowCreate(false)
     setBody('')
     await loadSignals()
   }
 
+  // 6) Close (sets closed_at)
   async function closeSignal(signalId: string) {
     setErrorMsg(null)
 
@@ -180,7 +216,10 @@ export default function FeedPage() {
           </div>
 
           <button
-            onClick={() => setShowCreate(true)}
+            onClick={() => {
+              setErrorMsg(null)
+              setShowCreate(true)
+            }}
             className="text-sm font-medium bg-white/10 hover:bg-white/15 border border-white/15 px-3 py-2 rounded-lg"
           >
             + Create Signal
@@ -193,41 +232,44 @@ export default function FeedPage() {
               No open signals yet.
             </div>
           ) : (
-            signals.map((s) => (
-              <div key={s.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="flex justify-between gap-3">
-                  <div className="font-semibold">
-                    {s.category} <span className="text-white/50">•</span> {s.city}
-                  </div>
+            signals.map((s) => {
+              const isMine = !!userId && s.user_id === userId
 
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-white/50 whitespace-nowrap">
-                      {new Date(s.created_at).toLocaleString()}
+              return (
+                <div key={s.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex justify-between gap-3 items-start">
+                    <div className="font-semibold">
+                      {s.category} <span className="text-white/50">•</span> {s.city}
                     </div>
 
-                    {/* Show Close only for your own signal */}
-                    {userId && s.user_id === userId && (
-                      <button
-                        onClick={() => closeSignal(s.id)}
-                        className="text-xs text-white/70 border border-white/15 bg-white/5 hover:bg-white/10 px-2 py-1 rounded-md"
-                      >
-                        Close
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs text-white/50 whitespace-nowrap">
+                        {new Date(s.created_at).toLocaleString()}
+                      </div>
+
+                      {isMine && (
+                        <button
+                          onClick={() => closeSignal(s.id)}
+                          className="text-xs text-white/70 border border-white/20 px-2 py-1 rounded-lg hover:bg-white/10"
+                        >
+                          Close
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {s.body ? (
+                    <div className="mt-2 text-white/80">{s.body}</div>
+                  ) : (
+                    <div className="mt-2 text-white/50 text-sm">(no message)</div>
+                  )}
+
+                  <div className="mt-2 text-xs text-white/50">
+                    Expires: {new Date(s.expires_at).toLocaleString()}
                   </div>
                 </div>
-
-                {s.body ? (
-                  <div className="mt-2 text-white/80">{s.body}</div>
-                ) : (
-                  <div className="mt-2 text-white/50 text-sm">(no message)</div>
-                )}
-
-                <div className="mt-2 text-xs text-white/50">
-                  Expires: {new Date(s.expires_at).toLocaleString()}
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       </div>
