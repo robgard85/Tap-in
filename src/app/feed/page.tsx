@@ -95,7 +95,8 @@ export default function FeedPage() {
   useEffect(() => {
     if (!loading) loadSignals()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])useEffect(() => {
+  }, [loading])
+    useEffect(() => {
   if (loading) return
 
   const channel = supabase
