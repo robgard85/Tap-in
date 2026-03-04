@@ -95,7 +95,25 @@ export default function FeedPage() {
   useEffect(() => {
     if (!loading) loadSignals()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])
+  }, [loading])useEffect(() => {
+  if (loading) return
+
+  const channel = supabase
+    .channel('signals-live')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'signals' },
+      () => {
+        loadSignals()
+      }
+    )
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [loading, supabase])
 
   async function createSignal() {
     if (!userId) return
