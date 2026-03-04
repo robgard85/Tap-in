@@ -14,7 +14,6 @@ function supabaseBrowser() {
 type SignalRow = {
   id: string
   created_at: string
-  updated_at: string
   user_id: string
   city: string
   category: string
@@ -23,20 +22,37 @@ type SignalRow = {
   closed_at: string | null
 }
 
+function isoPlusHours(hours: number) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
+}
+
 export default function FeedPage() {
   const router = useRouter()
   const supabase = useMemo(() => supabaseBrowser(), [])
 
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
-  const [signalsLoading, setSignalsLoading] = useState(true)
   const [signals, setSignals] = useState<SignalRow[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [signalsLoading, setSignalsLoading] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  // Create Signal UI
+  const [showCreate, setShowCreate] = useState(false)
+  const [city, setCity] = useState('Kannapolis')
+  const [category, setCategory] = useState('general')
+  const [body, setBody] = useState('')
 
   useEffect(() => {
     ;(async () => {
-      const { data } = await supabase.auth.getUser()
+      const { data, error } = await supabase.auth.getUser()
+
+      if (error) {
+        setErrorMsg(error.message)
+        router.replace('/login')
+        return
+      }
 
       if (!data?.user) {
         router.replace('/login')
@@ -44,35 +60,67 @@ export default function FeedPage() {
       }
 
       setUserEmail(data.user.email ?? null)
+      setUserId(data.user.id)
       setLoading(false)
-
-      // Fetch signals after auth is confirmed
-      setSignalsLoading(true)
-      setError(null)
-
-      const { data: rows, error: fetchErr } = await supabase
-        .from('signals')
-        .select(
-          'id,created_at,updated_at,user_id,city,category,body,expires_at,closed_at'
-        )
-        .is('closed_at', null)
-        .order('created_at', { ascending: false })
-        .limit(50)
-
-      if (fetchErr) {
-        setError(fetchErr.message)
-        setSignals([])
-      } else {
-        setSignals((rows as SignalRow[]) ?? [])
-      }
-
-      setSignalsLoading(false)
     })()
   }, [router, supabase])
 
   async function signOut() {
     await supabase.auth.signOut()
     router.replace('/login')
+  }
+
+  async function loadSignals() {
+    setSignalsLoading(true)
+    setErrorMsg(null)
+
+    const { data, error } = await supabase
+      .from('signals')
+      .select('id, created_at, user_id, city, category, body, expires_at, closed_at')
+      .is('closed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    if (error) {
+      setErrorMsg(error.message)
+      setSignals([])
+      setSignalsLoading(false)
+      return
+    }
+
+    setSignals(data ?? [])
+    setSignalsLoading(false)
+  }
+
+  useEffect(() => {
+    if (!loading) loadSignals()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
+  async function createSignal() {
+    if (!userId) return
+
+    setErrorMsg(null)
+
+    const payload = {
+      user_id: userId,
+      city: city.trim(),
+      category: category.trim(),
+      body: body.trim() ? body.trim() : null,
+      expires_at: isoPlusHours(24), // 24 hours from now
+    }
+
+    const { error } = await supabase.from('signals').insert(payload)
+
+    if (error) {
+      setErrorMsg(error.message)
+      return
+    }
+
+    // reset + refresh
+    setShowCreate(false)
+    setBody('')
+    await loadSignals()
   }
 
   if (loading) {
@@ -86,6 +134,7 @@ export default function FeedPage() {
   return (
     <main className="min-h-screen p-6">
       <div className="max-w-md mx-auto space-y-6">
+
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold">Tap-In Feed</h1>
           <button
@@ -101,61 +150,114 @@ export default function FeedPage() {
           <p className="mt-1 font-medium">{userEmail}</p>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-white/70">Signals</p>
-            <p className="text-sm text-white/60">{signals.length}</p>
+        {errorMsg && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+            {errorMsg}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <div className="text-white/80 text-sm">
+            Signals{' '}
+            <span className="text-white/50">
+              {signalsLoading ? '(loading...)' : `(${signals.length})`}
+            </span>
           </div>
 
-          {signalsLoading ? (
-            <p className="mt-3 text-white/70 text-sm">Loading signals…</p>
-          ) : error ? (
-            <div className="mt-3 text-sm text-red-300">
-              <div className="font-semibold">Can’t load signals</div>
-              <div className="mt-1 break-words">{error}</div>
-              <div className="mt-2 text-white/60">
-                This usually means RLS is blocking SELECT or your env vars are wrong.
-              </div>
-            </div>
-          ) : signals.length === 0 ? (
-            <p className="mt-3 text-white/70 text-sm">
+          <button
+            onClick={() => setShowCreate(true)}
+            className="text-sm font-medium bg-white/10 hover:bg-white/15 border border-white/15 px-3 py-2 rounded-lg"
+          >
+            + Create Signal
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {signals.length === 0 && !signalsLoading ? (
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
               No open signals yet.
-            </p>
+            </div>
           ) : (
-            <div className="mt-3 space-y-3">
-              {signals.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-white/10 bg-black/20 p-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold">
-                      {s.category} • {s.city}
-                    </div>
-                    <div className="text-xs text-white/60">
-                      {new Date(s.created_at).toLocaleString()}
-                    </div>
+            signals.map((s) => (
+              <div key={s.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="flex justify-between gap-3">
+                  <div className="font-semibold">
+                    {s.category} <span className="text-white/50">•</span> {s.city}
                   </div>
-
-                  {s.body ? (
-                    <div className="mt-2 text-sm text-white/80 whitespace-pre-wrap">
-                      {s.body}
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-sm text-white/60 italic">
-                      (no message)
-                    </div>
-                  )}
-
-                  <div className="mt-3 text-xs text-white/50">
-                    Expires: {new Date(s.expires_at).toLocaleString()}
+                  <div className="text-xs text-white/50 whitespace-nowrap">
+                    {new Date(s.created_at).toLocaleString()}
                   </div>
                 </div>
-              ))}
-            </div>
+                {s.body ? (
+                  <div className="mt-2 text-white/80">{s.body}</div>
+                ) : (
+                  <div className="mt-2 text-white/50 text-sm">(no message)</div>
+                )}
+                <div className="mt-2 text-xs text-white/50">
+                  Expires: {new Date(s.expires_at).toLocaleString()}
+                </div>
+              </div>
+            ))
           )}
         </div>
       </div>
+
+      {/* Create Modal */}
+      {showCreate && (
+        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#071022] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Create Signal</div>
+              <button
+                onClick={() => setShowCreate(false)}
+                className="text-white/60 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-white/60">City</label>
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none"
+                placeholder="Kannapolis"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-white/60">Category</label>
+              <input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none"
+                placeholder="general"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-white/60">Message (optional)</label>
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                className="w-full min-h-[90px] rounded-lg bg-white/5 border border-white/10 px-3 py-2 text-sm outline-none"
+                placeholder="What’s your signal?"
+              />
+              <div className="text-xs text-white/50">
+                Auto-expires in 24 hours.
+              </div>
+            </div>
+
+            <button
+              onClick={createSignal}
+              className="w-full rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 px-3 py-2 text-sm font-medium"
+            >
+              Post Signal
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
